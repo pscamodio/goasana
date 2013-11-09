@@ -21,12 +21,27 @@ type User struct {
 }
 
 const (
-	api_key string = "2qnhTBYf.uKGAHHYy4PbaAQUMXs2Ux5c"
-	uri     string = "https://app.asana.com/api/1.0/users/me"
+	main_uri string = "https://app.asana.com/api/1.0"
+	user_uri string = "/users"
+	me_uri   string = "/me"
 )
 
+var api_key string
+
+func setApiKey(key string) {
+	api_key = key
+}
+
+func init() {
+	key, err := ioutil.ReadFile("api.key")
+	if err != nil {
+		panic(err)
+	}
+	api_key = string(key)
+}
+
 func GetMe() (me *User, err error) {
-	req, err := http.NewRequest("GET", uri, nil)
+	req, err := http.NewRequest("GET", main_uri+user_uri+me_uri, nil)
 	if err != nil {
 		return
 	}
@@ -44,4 +59,25 @@ func GetMe() (me *User, err error) {
 	}
 	json.Unmarshal(data, &temp)
 	return &temp.Data, nil
+}
+
+func GetUsers() (users []User, err error) {
+	req, err := http.NewRequest("GET", main_uri+user_uri, nil)
+	if err != nil {
+		return
+	}
+	req.SetBasicAuth(api_key, "")
+	ris, err := client.Do(req)
+	if err != nil {
+		return
+	}
+	data, err := ioutil.ReadAll(ris.Body)
+	if err != nil {
+		return
+	}
+	var temp struct {
+		Data []User
+	}
+	json.Unmarshal(data, &temp)
+	return temp.Data, nil
 }
