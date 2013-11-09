@@ -1,9 +1,9 @@
 package main
 
-func test() string {
-	return "this is a test"
+func test(in string) string {
+	return in
 }
 
 func main() {
-	println(test())
+	println(test("ciao"))
 }
