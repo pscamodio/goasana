@@ -3,7 +3,6 @@ package goasana
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strconv"
 	"strings"
 )
@@ -183,7 +182,6 @@ func GetWorkspaces() (workspaces []Workspace, err error) {
 		Data   []Workspace
 		Errors []Error
 	}
-	fmt.Println(string(data))
 	json.Unmarshal(data, &temp)
 	err = checkForErrors(temp.Errors)
 	if err != nil {
@@ -214,7 +212,6 @@ func GetProjects(workspace_id int) (projects []Project, err error) {
 func GetProjectData(project_id int) (project Project, err error) {
 	idstr := "/" + strconv.FormatInt(int64(project_id), 10)
 	data, err := SendRequest("GET", main_uri+projects_uri+idstr)
-	fmt.Println(main_uri + projects_uri + idstr)
 	if err != nil {
 		return
 	}
