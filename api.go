@@ -18,7 +18,7 @@ type BaseData struct {
 
 type Tag struct {
 	BaseData
-	Created_ad string
+	Created_at string
 	Followers  []User
 	Color      string
 	Notes      string
@@ -58,13 +58,25 @@ type Task struct {
 	Assignee_status string
 	Created_at      string
 	Completed       bool
-	Completed_ad    string
+	Completed_at    string
 	Due_on          string
 	Followers       []User
 	Modified_at     string
 	Projects        []Project
 	Parent          BaseData
 	Workspace       Workspace
+}
+
+type AsanaConn struct {
+	connInfo
+	Connected bool
+	Me        User
+}
+
+type ExtraParams struct {
+	PrettyPrint    bool
+	RequiredFields []string
+	ExpandFields   []string
 }
 
 const (
@@ -77,6 +89,7 @@ const (
 	tags_uri          string = "/tags"
 	projects_uri      string = "/projects"
 	organizations_uri string = "/organizations"
+	teams_uri         string = "/teams"
 )
 
 func checkForErrors(err []Error) error {
@@ -90,8 +103,54 @@ func checkForErrors(err []Error) error {
 	return errors.New(strings.Join(lines, "\n"))
 }
 
-func GetMe() (me *User, err error) {
-	data, err := SendRequest("GET", main_uri+users_uri+me_uri)
+func (params *ExtraParams) ToFilters() (m map[string]string) {
+	m = make(map[string]string)
+	if params == nil {
+		return
+	}
+	if params.PrettyPrint {
+		m["opt_pretty"] = "true"
+	}
+	if params.RequiredFields != nil {
+		fields := make([]string, 0)
+		for _, f := range params.RequiredFields {
+			fields = append(fields, f)
+		}
+		m["opt_fields"] = strings.Join(fields, ",")
+	}
+	if params.ExpandFields != nil {
+		fields := make([]string, 0)
+		for _, f := range params.ExpandFields {
+			fields = append(fields, f)
+		}
+		m["opt_expand"] = strings.Join(fields, ",")
+	}
+	return
+}
+
+func NewSimpleConnection(apiKey string) (conn *AsanaConn, err error) {
+	if apiKey == "" {
+		return nil, errors.New("Empty Key")
+	}
+	cnInfo := connInfo{true, apiKey, ""}
+	data, err := cnInfo.SendRequest("GET", main_uri+users_uri+me_uri)
+	if err != nil {
+		return
+	}
+	var temp struct {
+		Data   User
+		Errors []Error
+	}
+	json.Unmarshal(data, &temp)
+	err = checkForErrors(temp.Errors)
+	if err != nil {
+		return
+	}
+	return &AsanaConn{connInfo: cnInfo, Connected: true, Me: temp.Data}, nil
+}
+
+func (conn AsanaConn) GetMe(params *ExtraParams) (me *User, err error) {
+	data, err := conn.SendRequestWithFilters("GET", main_uri+users_uri+me_uri, params.ToFilters())
 	if err != nil {
 		return
 	}
@@ -107,9 +166,9 @@ func GetMe() (me *User, err error) {
 	return &temp.Data, nil
 }
 
-func GetUserData(user_id int) (user *User, err error) {
+func (conn AsanaConn) GetUserData(user_id int, params *ExtraParams) (user *User, err error) {
 	idstring := "/" + strconv.FormatInt(int64(user_id), 10)
-	data, err := SendRequest("GET", main_uri+users_uri+idstring)
+	data, err := conn.SendRequestWithFilters("GET", main_uri+users_uri+idstring, params.ToFilters())
 	if err != nil {
 		return
 	}
@@ -125,8 +184,8 @@ func GetUserData(user_id int) (user *User, err error) {
 	return &temp.Data, nil
 }
 
-func GetUsers() (users []User, err error) {
-	data, err := SendRequest("GET", main_uri+users_uri)
+func (conn AsanaConn) GetUsers(params *ExtraParams) (users []User, err error) {
+	data, err := conn.SendRequestWithFilters("GET", main_uri+users_uri, params.ToFilters())
 	if err != nil {
 		return
 	}
@@ -142,9 +201,9 @@ func GetUsers() (users []User, err error) {
 	return temp.Data, nil
 }
 
-func GetUsersFromWorkspace(workspace_id int) (users []User, err error) {
+func (conn AsanaConn) GetUsersFromWorkspace(workspace_id int, params *ExtraParams) (users []User, err error) {
 	idstring := "/" + strconv.FormatInt(int64(workspace_id), 10)
-	data, err := SendRequest("GET", main_uri+workspaces_uri+idstring+users_uri)
+	data, err := conn.SendRequestWithFilters("GET", main_uri+workspaces_uri+idstring+users_uri, params.ToFilters())
 	if err != nil {
 		return
 	}
@@ -160,16 +219,16 @@ func GetUsersFromWorkspace(workspace_id int) (users []User, err error) {
 	return temp.Data, nil
 }
 
-func GetTaskFromUser(workspace, userid int, archivied bool) (tasks []Task, err error) {
+func (conn AsanaConn) GetTaskFromUser(workspace, userid int, archivied bool, params *ExtraParams) (tasks []Task, err error) {
 	archivied_str := "false"
 	if archivied {
 		archivied_str = "true"
 	}
-	filters := map[string]string{
-		"assignee":          strconv.FormatInt(int64(userid), 10),
-		"workspace":         strconv.FormatInt(int64(workspace), 10),
-		"include_archivied": archivied_str}
-	data, err := SendRequestWithFilters("GET", main_uri+tasks_uri, filters)
+	filters := params.ToFilters()
+	filters["assignee"] = strconv.FormatInt(int64(userid), 10)
+	filters["workspace"] = strconv.FormatInt(int64(workspace), 10)
+	filters["include_archivied"] = archivied_str
+	data, err := conn.SendRequestWithFilters("GET", main_uri+tasks_uri, filters)
 	if err != nil {
 		return
 	}
@@ -185,9 +244,9 @@ func GetTaskFromUser(workspace, userid int, archivied bool) (tasks []Task, err e
 	return temp.Data, nil
 }
 
-func GetTaskData(taskid int) (task *Task, err error) {
+func (conn AsanaConn) GetTaskData(taskid int, params *ExtraParams) (task *Task, err error) {
 	taskstr := "/" + strconv.FormatInt(int64(taskid), 10)
-	data, err := SendRequest("GET", main_uri+tasks_uri+taskstr)
+	data, err := conn.SendRequestWithFilters("GET", main_uri+tasks_uri+taskstr, params.ToFilters())
 	if err != nil {
 		return
 	}
@@ -203,9 +262,9 @@ func GetTaskData(taskid int) (task *Task, err error) {
 	return &temp.Data, nil
 }
 
-func GetSubTask(taskid int) (stasks []Task, err error) {
+func (conn AsanaConn) GetSubTask(taskid int, params *ExtraParams) (stasks []Task, err error) {
 	idstr := "/" + strconv.FormatInt(int64(taskid), 10)
-	data, err := SendRequest("GET", main_uri+tasks_uri+idstr+subtasks_uri)
+	data, err := conn.SendRequestWithFilters("GET", main_uri+tasks_uri+idstr+subtasks_uri, params.ToFilters())
 	if err != nil {
 		return
 	}
@@ -221,9 +280,9 @@ func GetSubTask(taskid int) (stasks []Task, err error) {
 	return temp.Data, nil
 }
 
-func GetTagsFromTask(taskid int) (tags []Tag, err error) {
+func (conn AsanaConn) GetTagsFromTask(taskid int, params *ExtraParams) (tags []Tag, err error) {
 	idstr := "/" + strconv.FormatInt(int64(taskid), 10)
-	data, err := SendRequest("GET", main_uri+tasks_uri+idstr+tags_uri)
+	data, err := conn.SendRequestWithFilters("GET", main_uri+tasks_uri+idstr+tags_uri, params.ToFilters())
 	if err != nil {
 		return
 	}
@@ -239,8 +298,8 @@ func GetTagsFromTask(taskid int) (tags []Tag, err error) {
 	return temp.Data, nil
 }
 
-func GetWorkspaces() (workspaces []Workspace, err error) {
-	data, err := SendRequest("GET", main_uri+workspaces_uri)
+func (conn AsanaConn) GetWorkspaces(params *ExtraParams) (workspaces []Workspace, err error) {
+	data, err := conn.SendRequestWithFilters("GET", main_uri+workspaces_uri, params.ToFilters())
 	if err != nil {
 		return
 	}
@@ -256,10 +315,28 @@ func GetWorkspaces() (workspaces []Workspace, err error) {
 	return temp.Data, nil
 }
 
-func GetProjects(workspace_id int) (projects []Project, err error) {
-	filters := map[string]string{
-		"workspace": strconv.FormatInt(int64(workspace_id), 10)}
-	data, err := SendRequestWithFilters("GET", main_uri+projects_uri, filters)
+func (conn AsanaConn) GetWorkspaceData(workspace_id int, params *ExtraParams) (workspace *Workspace, err error) {
+	idstr := "/" + strconv.FormatInt(int64(workspace_id), 10)
+	data, err := conn.SendRequestWithFilters("GET", main_uri+workspaces_uri+idstr, params.ToFilters())
+	if err != nil {
+		return
+	}
+	var temp struct {
+		Data   Workspace
+		Errors []Error
+	}
+	json.Unmarshal(data, &temp)
+	err = checkForErrors(temp.Errors)
+	if err != nil {
+		return
+	}
+	return &temp.Data, nil
+}
+
+func (conn AsanaConn) GetProjects(workspace_id int, params *ExtraParams) (projects []Project, err error) {
+	filters := params.ToFilters()
+	filters["workspace"] = strconv.FormatInt(int64(workspace_id), 10)
+	data, err := conn.SendRequestWithFilters("GET", main_uri+projects_uri, filters)
 	if err != nil {
 		return
 	}
@@ -275,9 +352,9 @@ func GetProjects(workspace_id int) (projects []Project, err error) {
 	return temp.Data, nil
 }
 
-func GetProjectData(project_id int) (project *Project, err error) {
+func (conn AsanaConn) GetProjectData(project_id int, params *ExtraParams) (project *Project, err error) {
 	idstr := "/" + strconv.FormatInt(int64(project_id), 10)
-	data, err := SendRequest("GET", main_uri+projects_uri+idstr)
+	data, err := conn.SendRequestWithFilters("GET", main_uri+projects_uri+idstr, params.ToFilters())
 	if err != nil {
 		return
 	}
@@ -293,15 +370,15 @@ func GetProjectData(project_id int) (project *Project, err error) {
 	return &temp.Data, nil
 }
 
-func GetTaskFromProject(project_id int, archivied bool) (tasks []Task, err error) {
+func (conn AsanaConn) GetTaskFromProject(project_id int, archivied bool, params *ExtraParams) (tasks []Task, err error) {
 	archivied_str := "false"
 	if archivied {
 		archivied_str = "true"
 	}
-	filters := map[string]string{
-		"project":           strconv.FormatInt(int64(project_id), 10),
-		"include_archivied": archivied_str}
-	data, err := SendRequestWithFilters("GET", main_uri+tasks_uri, filters)
+	filters := params.ToFilters()
+	filters["project"] = strconv.FormatInt(int64(project_id), 10)
+	filters["include_archivied"] = archivied_str
+	data, err := conn.SendRequestWithFilters("GET", main_uri+tasks_uri, filters)
 	if err != nil {
 		return
 	}
@@ -317,9 +394,9 @@ func GetTaskFromProject(project_id int, archivied bool) (tasks []Task, err error
 	return temp.Data, nil
 }
 
-func GetTagData(tag_id int) (tag *Tag, err error) {
+func (conn AsanaConn) GetTagData(tag_id int, params *ExtraParams) (tag *Tag, err error) {
 	idstr := "/" + strconv.FormatInt(int64(tag_id), 10)
-	data, err := SendRequest("GET", main_uri+tags_uri+idstr)
+	data, err := conn.SendRequestWithFilters("GET", main_uri+tags_uri+idstr, params.ToFilters())
 	if err != nil {
 		return
 	}
@@ -335,9 +412,9 @@ func GetTagData(tag_id int) (tag *Tag, err error) {
 	return &temp.Data, nil
 }
 
-func GetTasksFromTag(tag_id int) (tasks []Task, err error) {
+func (conn AsanaConn) GetTasksFromTag(tag_id int, params *ExtraParams) (tasks []Task, err error) {
 	idstr := "/" + strconv.FormatInt(int64(tag_id), 10)
-	data, err := SendRequest("GET", main_uri+tags_uri+idstr+tasks_uri)
+	data, err := conn.SendRequestWithFilters("GET", main_uri+tags_uri+idstr+tasks_uri, params.ToFilters())
 	if err != nil {
 		return
 	}
@@ -353,8 +430,8 @@ func GetTasksFromTag(tag_id int) (tasks []Task, err error) {
 	return temp.Data, nil
 }
 
-func GetTags() (tags []Tag, err error) {
-	data, err := SendRequest("GET", main_uri+tags_uri)
+func (conn AsanaConn) GetTags(params *ExtraParams) (tags []Tag, err error) {
+	data, err := conn.SendRequestWithFilters("GET", main_uri+tags_uri, params.ToFilters())
 	if err != nil {
 		return
 	}
@@ -370,9 +447,9 @@ func GetTags() (tags []Tag, err error) {
 	return temp.Data, nil
 }
 
-func GetTagsFromWorkspace(workspace_id int) (tags []Tag, err error) {
+func (conn AsanaConn) GetTagsFromWorkspace(workspace_id int, params *ExtraParams) (tags []Tag, err error) {
 	idstr := "/" + strconv.FormatInt(int64(workspace_id), 10)
-	data, err := SendRequest("GET", main_uri+workspaces_uri+idstr+tags_uri)
+	data, err := conn.SendRequestWithFilters("GET", main_uri+workspaces_uri+idstr+tags_uri, params.ToFilters())
 	if err != nil {
 		return
 	}
@@ -386,5 +463,22 @@ func GetTagsFromWorkspace(workspace_id int) (tags []Tag, err error) {
 		return
 	}
 	return temp.Data, nil
+}
 
+func (conn AsanaConn) GetTeams(organization_id int, params *ExtraParams) (teams []Team, err error) {
+	idstr := "/" + strconv.FormatInt(int64(organization_id), 10)
+	data, err := conn.SendRequestWithFilters("GET", main_uri+organizations_uri+idstr+teams_uri, params.ToFilters())
+	if err != nil {
+		return
+	}
+	var temp struct {
+		Data   []Team
+		Errors []Error
+	}
+	json.Unmarshal(data, &temp)
+	err = checkForErrors(temp.Errors)
+	if err != nil {
+		return
+	}
+	return temp.Data, nil
 }

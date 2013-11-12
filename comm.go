@@ -1,33 +1,26 @@
 package goasana
 
 import (
+	"errors"
 	"io"
 	"io/ioutil"
 	"net/http"
 	"strings"
 )
 
+type connInfo struct {
+	simpleConn bool
+	apiKey     string
+	token      string
+}
+
 var client http.Client
 
-var api_key string
-
-func init() {
-	key, err := ioutil.ReadFile("api.key")
-	if err != nil {
-		panic(err)
-	}
-	api_key = string(key)
-}
-
-func setApiKey(key string) {
-	api_key = key
-}
-
-func SendRequestWithFilters(method string, url string, filters map[string]string) (data []byte, err error) {
+func (conn connInfo) SendRequestWithFilters(method string, url string, filters map[string]string) (data []byte, err error) {
 	var body io.ReadCloser
 	if len(filters) != 0 {
 		url += "?"
-		params := make([]string, len(filters))
+		params := make([]string, 0)
 		for key, val := range filters {
 			params = append(params, key+"="+val)
 		}
@@ -37,7 +30,11 @@ func SendRequestWithFilters(method string, url string, filters map[string]string
 	if err != nil {
 		return
 	}
-	req.SetBasicAuth(api_key, "")
+	if conn.simpleConn {
+		req.SetBasicAuth(conn.apiKey, "")
+	} else {
+		return nil, errors.New("Oatuh not implemented")
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return
@@ -49,6 +46,6 @@ func SendRequestWithFilters(method string, url string, filters map[string]string
 	return data, nil
 }
 
-func SendRequest(method string, url string) (data []byte, err error) {
-	return SendRequestWithFilters(method, url, nil)
+func (conn connInfo) SendRequest(method string, url string) (data []byte, err error) {
+	return conn.SendRequestWithFilters(method, url, nil)
 }
